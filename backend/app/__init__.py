@@ -1,1 +1,1 @@
-# Package marker
+"""SupportPilot backend package."""
