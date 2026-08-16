@@ -10,6 +10,11 @@ class Settings(BaseSettings):
         "http://localhost:3000",
     ]
 
+    # LLM Configuration
+    DEFAULT_LLM_PROVIDER: str 
+    DEFAULT_LLM_MODEL: str 
+    DEFAULT_LLM_TEMPERATURE: float = 0
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
