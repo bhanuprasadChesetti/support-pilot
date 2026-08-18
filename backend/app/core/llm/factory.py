@@ -1,6 +1,6 @@
 from .constants import Providers
 from langchain.chat_models.base import init_chat_model
-from app.config import Settings
+from app.config import settings
 
 
 
@@ -8,9 +8,9 @@ class LLMFactory:
 
     @staticmethod
     def get_model(
-        provider:str = Settings.DEFAULT_LLM_PROVIDER,
-        model:str = Settings.DEFAULT_LLM_MODEL,
-        temperature:float = Settings.DEFAULT_LLM_TEMPERATURE,
+        provider:str = settings.DEFAULT_LLM_PROVIDER,
+        model:str = settings.DEFAULT_LLM_MODEL,
+        temperature:float = settings.DEFAULT_LLM_TEMPERATURE,
     ):
 
         """
