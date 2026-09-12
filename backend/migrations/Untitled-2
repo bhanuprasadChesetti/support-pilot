@@ -1,0 +1,5 @@
+
+uv run alembic init -t async  migrations -- Creats alembic setup
+
+
+alembic revision --autogenerate -m "Initial commit". -- Creats initial migrations files
