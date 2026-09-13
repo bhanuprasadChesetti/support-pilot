@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -7,8 +8,8 @@ class ChatRequest(BaseModel):
         description="The message sent by the customer.",
         examples=["My order hasn't arrived."],
     )
-    conversation_id: str = Field(
-        ...,
+    conversation_id: Optional[str] = Field(
+        None,
         description="Unique identifier for the chat session.",
         examples=["123"],
     )
@@ -22,3 +23,9 @@ class ChatResponse(BaseModel):
             "I understand your concern. Could you please provide your order number so I can help you further?"
         ],
     )
+    conversation_id: Optional[str] = Field(
+        None,
+        description="Unique identifier for the chat session.",
+        examples=["123"],
+    )
+

@@ -17,6 +17,25 @@ def get_chat_service() -> ChatService:
 async def send_chat_message(
     request: ChatRequest,
     service: Annotated[ChatService, Depends(get_chat_service)],
+    user_id: int,
+    organization_id: int,
 ) -> ChatResponse:
     """Chat endpoint for receiving customer messages and returning AI support responses."""
-    return await service.get_response(request)
+    return await service.get_response(request, user_id=user_id, organization_id=organization_id)
+
+
+from fastapi.responses import StreamingResponse
+
+
+@router.post("/chat/stream", tags=["Chat"])
+async def stream_chat_message(
+    request: ChatRequest,
+    service: Annotated[ChatService, Depends(get_chat_service)],
+    user_id: int,
+    organization_id: int,
+) -> StreamingResponse:
+    """Streaming chat endpoint for customer messages using Server-Sent Events (SSE)."""
+    generator = service.stream_response(request, user_id=user_id, organization_id=organization_id)
+    return StreamingResponse(generator, media_type="text/event-stream")
+
+

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     DEFAULT_LLM_PROVIDER: str 
     DEFAULT_LLM_MODEL: str 
     DEFAULT_LLM_TEMPERATURE: float = 0
+    DEFAULT_LLM_TIMEOUT: float = 120.0
     NVIDIA_API_KEY: str
 
     POSTGRES_USER: str
