@@ -29,6 +29,20 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str
 
+
+    EMBEDDING_MODEL_PROVIDER:str
+    EMBEDDING_MODEL:str
+    SPARSE_EMBEDDING_MODEL:str
+    EMBEDDING_MODEL_KWARGS:dict
+    EMBEDDING_MODEL_ENCODE_KWARGS:dict
+
+    VECTOR_DB_NAME:str
+    VECTOR_DB_ENDPOINT:str
+    VECTOR_DB_COLLECTION_NAME:str
+    COLLECTION_DIMENSION:int
+    VECTOR_DISTANCE:str
+
+
     @computed_field
     @property
     def DATABASE_URL(self) -> PostgresDsn:
@@ -40,6 +54,14 @@ class Settings(BaseSettings):
             port=self.POSTGRES_PORT,
             path=self.POSTGRES_DB,
         )
+
+    
+    @computed_field
+    @property
+    def SYNC_DATABASE_URL(self) -> str:
+        # Formats the string specifically for LangChain's SQLRecordManager using psycopg2
+        return f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
 
     # 2. Pydantic will now automatically see them in os.environ
     model_config = SettingsConfigDict(
