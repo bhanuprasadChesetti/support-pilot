@@ -1,10 +1,16 @@
 from typing import List
 from typing_extensions import TypedDict
+from sentence_transformers import CrossEncoder
 from langgraph.graph import StateGraph, START, END
-from .vector_db.service import get_db_client
+from .vector_db.service import get_vector_store
 
 
-vector_store = get_db_client()
+vector_store = get_vector_store()
+
+# Initialize the Cross-Encoder model once (e.g., during your app startup)
+# 'ms-marco-MiniLM' models are fast, lightweight, and excellent for RAG reranking
+reranker_model = CrossEncoder("mixedbread-ai/mxbai-rerank-large-v2")
+
 
 class RAGState(TypedDict):
     query: str               # Input query from the agent
@@ -18,13 +24,51 @@ async def vector_search(state: RAGState) -> dict:
     """Queries the Qdrant Vector Store using LangChain's async similarity search."""
     query = state["query"]
     
+    k = state["top_k"] * 3
+
     raw_docs = await vector_store.asimilarity_search(
         query=query,
-        k=10
+        k=k
     )
     
     return {"raw_documents": raw_docs}
 
+
+
+
+def rerank_documents(state: dict) -> dict:
+    """
+    Reranks a list of Document objects using mixedbread-ai/mxbai-rerank-large-v2.
+    
+    Expected state structure:
+    state = {
+        'query': 'Kubernetes Job Hierarchy',
+        'top_k': 5,
+        'raw_documents': [Document(...), Document(...)]
+    }
+    """
+    query = state.get("query", "")
+    raw_docs = state.get("raw_documents", [])
+    final_top_k = state.get("top_k", 5)
+
+    
+    if not raw_docs:
+        state["reranked_documents"] = []
+        return state
+
+    
+    doc_texts = [doc.page_content for doc in raw_docs]
+    query_doc_pairs = [[query, text] for text in doc_texts]
+    
+    
+    scores = reranker_model.predict(query_doc_pairs)
+    docs_with_scores = list(zip(raw_docs, scores))
+    docs_with_scores.sort(key=lambda x: x[1], reverse=True)
+    
+    reranked_docs = [doc for doc, score in docs_with_scores[:final_top_k]]
+    state["reranked_documents"] = reranked_docs
+
+    return state
 
 
 async def top_k_filter(state: RAGState) -> dict:

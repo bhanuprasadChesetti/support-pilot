@@ -6,7 +6,7 @@ from .preprocessor import DirectoryPreProcessor
 from .parsers.text import load_text_files_from_directory
 from .chunkers.markdown import MarkdownSplitter
 from .chunkers.recursive_char import RecursiveCharacterTextSplitter
-from ..vector_db.service import get_db_client
+from ..vector_db.service import get_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +23,7 @@ logger.info(f"Using Record Manager with namespace: {record_manager.namespace}")
 record_manager.create_schema()
 
 
-vector_store_client = get_db_client()
-
+vector_store = get_vector_store()
 
 
 def preprocess_docs(source_dir:str,target_dir:str=None,ftype = None):
@@ -79,7 +78,7 @@ def load_documents(
     indexing_result = index(
         docs_source=chunks,
         record_manager=record_manager,
-        vector_store=vector_store_client.get_underlying_vector_store(),
+        vector_store=vector_store,
         cleanup="incremental",  # Deletes old chunks of modified files, skips unchanged files
         source_id_key="source"  # Tracks identity based on the file path in metadata
     )

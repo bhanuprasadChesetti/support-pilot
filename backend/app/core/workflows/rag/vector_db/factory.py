@@ -17,4 +17,4 @@ class VectorDBFactory:
         if db_class is None:
             raise ValueError(f"Unknown database provider: {db_type}")
 
-        return db_class(**kwargs)
+        return db_class()

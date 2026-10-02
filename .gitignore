@@ -219,3 +219,5 @@ __marimo__/
 
 
 backend/.postgres_data
+
+backend/qdrant_storage
