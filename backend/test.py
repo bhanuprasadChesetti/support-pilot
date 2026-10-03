@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 
-from app.core.workflows.rag.service import rag
-from app.core.workflows.rag.ingestion.service import load_documents
-from app.core.workflows.rag.vector_db.service import create_collection
+from app.core.workflows.rag.service import rag,query_enhancement
+# from app.core.workflows.rag.ingestion.service import load_documents
+# from app.core.workflows.rag.vector_db.service import create_collection
 
 def save_graph_image():
     print(f"Inspecting workflow structure for: {rag}")
@@ -52,12 +52,10 @@ async def main():
     try:
         # 3. Call the service with a safety timeout
         print("Sending query...")
-        results = await asyncio.wait_for(
-            rag.ainvoke({"query": "Kubernetes Job Hierarchy", "top_k": 5}), 
-            timeout=15.0
-        )
+        results = await rag.ainvoke({"query": "How does Kubernetes manage application deployment and scaling, how does it provide service discovery and load balancing between Pods, and how does it recover when Pods or containers fail?", "top_k": 2})
+        # results = query_enhancement({"query": "What is a Kubernetes Deployment and how does it manage the desired number of pod replicas?", "top_k": 5})
         print("\n--- Results ---")
-        logger.info(results)
+        # logger.info(results)
         print(results['context'])
         
     except asyncio.TimeoutError:
@@ -69,8 +67,5 @@ async def main():
 if __name__ == "__main__":
 
 
-    create_collection()
-
-    load_documents(target_directory='/Volumes/Stark/fight/Repos/AI/marathon/data_cleaned/kubernetes')
 
     asyncio.run(main())

@@ -1,7 +1,9 @@
+import logging
 from .constants import Providers
 from langchain.chat_models.base import init_chat_model
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 
 
 class LLMFactory:
@@ -24,14 +26,16 @@ class LLMFactory:
             timeout: Network/socket timeout limit in seconds
         Returns:
             Initialized chat model instance
-        
+
         Example:
             >>> llm = LLMFactory.get_model(provider="openai", model="gpt-3.5-turbo", timeout=120.0)
         """
 
         if provider not in Providers:
             raise ValueError(f"Provider {provider} is not supported. Supported providers are: {','.join([p for p in Providers])}")
-            
+
+        logger.info(f"Initializing chat model | Provider: {provider} | Model: {model} | Temp: {temperature} | Timeout: {timeout}s")
+
         llm = init_chat_model(
             model=model,
             model_provider=provider,
@@ -40,3 +44,4 @@ class LLMFactory:
         )
 
         return llm
+
