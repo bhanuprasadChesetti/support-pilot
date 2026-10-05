@@ -161,7 +161,7 @@ async def react_agent():
     print_agent_trace(results)
 
 
-async def test_order_issue_resolutor_workflow():
+async def test_order_issue_resolutor_v2_workflow():
     from app.core.workflows.order_issue_resolutor.order_issue_resolution import order_issue_resolutor
     result = await order_issue_resolutor.ainvoke({
         "user_query": "I bought an item yesterday but my order ID is 12345. The screen is cracked, can I get a refund?"
@@ -172,8 +172,21 @@ async def test_order_issue_resolutor_workflow():
     print(result['final_response'])
 
 
+async def test_order_issue_resolutor_v3_workflow():
+    from app.core.workflows.order_issue_resolutor.order_issue_resolution import order_issue_resolutor
+    result = await order_issue_resolutor.ainvoke({
+        "user_query": "Where is ORD-8821 right now?"
+    })
+
+    logger.debug(result)
+
+    print('=========================================')
+    print(result['final_response'])
+    print('=========================================')
+
+
 if __name__ == "__main__":
 
 
-    asyncio.run(test_order_issue_resolutor_workflow())
+    asyncio.run(test_order_issue_resolutor_v3_workflow())
    

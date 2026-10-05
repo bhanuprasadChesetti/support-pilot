@@ -1,3 +1,4 @@
+from anthropic.types.beta import beta_request_mcp_server_tool_configuration_param
 import logging
 from typing import TypedDict
 from pydantic import BaseModel, Field
@@ -5,33 +6,40 @@ from langgraph.graph import StateGraph,START, END
 from langgraph.graph.message import add_messages
 from langchain_core.prompts import ChatPromptTemplate
 from app.core.llm.factory import LLMFactory
-from app.core.tools.ecommerce import get_order_details,get_shipment_status
+from app.core.tools.ecommerce import get_order_details,get_shipment_status,get_customer_profile
 from app.core.tools.rag import create_search_knowledge_tool
 
 logger = logging.getLogger(__name__)
 
+from typing import TypedDict, List, Optional, Literal
+
 
 class SupportState(TypedDict):
     user_query: str
+    order_id: Optional[str]
+    customer_id: Optional[str]
+    issue_type: Optional[str]
+    
+    # The router will populate this list (e.g., ["order_fetch", "policy_fetch"])
+    required_fetches: List[Literal["order_fetch", "customer_fetch", "policy_fetch","shipment_fetch"]]
 
-    order_id: str | None
-    customer_id: str | None
-    issue_type: str | None
+    # Parallel node outputs
+    order: Optional[dict]
+    shipment: Optional[dict]
+    customer: Optional[dict]
+    policy_context: Optional[str]
 
-    order: dict | None
-    shipment: dict | None
-
-    policy_context: str | None
-
-    resolution: dict | None
-
-    final_response: str | None
-
+    resolution: Optional[dict]
+    final_response: Optional[str]
 
 
 class RequestAnalyzerOutput(TypedDict):
-    order_id: str
-    issue_type: str
+    order_id: Optional[str]
+    customer_id: Optional[str]
+    issue_type: Optional[str]
+    # The LLM decides what data is missing/needed to solve the issue
+    needed_information: List[Literal["order", "customer", "policy", "shipment"]]
+
 
 request_analyzer_llm = LLMFactory.get_model().with_structured_output(RequestAnalyzerOutput)
 
@@ -39,43 +47,77 @@ search_knowledge_tool = create_search_knowledge_tool(top_k=2)
 
 def request_analyzer(state: SupportState) -> dict:
     """Extracts order_id and issue_type from the user's initial query."""
-    logger.debug(f"Analyzing request: {state['user_query']}")
+    logger.info(f"Analyzing request: {state}")
+
+
     extracted_data = request_analyzer_llm.invoke(state["user_query"])
-    return {
-        "order_id": extracted_data["order_id"],
-        "issue_type": extracted_data["issue_type"]
-    }
-
-
-def order_investigator(state: SupportState) -> dict:
-    """Fetches order and shipment data using the extracted order_id."""
-    logger.debug(f"Investigating order: {state['order_id']}")
     
-    order_id = state["order_id"]
-    order_data = get_order_details.invoke(order_id)
-    shipment_data = get_shipment_status.invoke(order_id)
-
-    logger.debug(f"Order data: {order_data}")
-    logger.debug(f"Shipment data: {shipment_data}")
+    mapping = {
+        "order": "order_fetch",
+        "customer": "customer_fetch",
+        "policy": "policy_fetch",
+        "shipment": "shipment_fetch"
+    }
+    required_nodes = [mapping[item] for item in extracted_data["needed_information"] if item in mapping]
+    logger.debug(f'Required Nodes to call {required_nodes}')
 
     return {
-        "order": order_data,
-        "shipment": shipment_data
+        "order_id": extracted_data.get("order_id"),
+        "customer_id": extracted_data.get("customer_id"),
+        "issue_type": extracted_data.get("issue_type"),
+        "required_fetches": required_nodes
     }
 
 
 
-async def policy_retriever(state: SupportState) -> dict:
-    """Retrieves relevant company policies based on the extracted issue_type."""
-    logger.debug(f"Retrieving policy for issue type: {state['issue_type']}")
-    issue_type = state["issue_type"]
+def order_fetch(state: SupportState) -> dict:
+    """Fetches order data concurrently."""
+    logger.debug(f'Fetching order data for Order Id: {state["order_id"]}')
+    data = get_order_details.invoke(state["order_id"]) 
+    return {"order": data}
+
+
+def customer_fetch(state: SupportState) -> dict:
+    """Fetches customer profile concurrently."""
+    logger.debug(f'Fetching customer data for Customer Id: {state["customer_id"]}')
+    data = get_customer_profile.invoke(state["customer_id"]) 
+    return {"customer": data}
+
+
+async def policy_fetch(state: SupportState) -> dict:
+    """Fetches policy documents concurrently."""
+    logger.debug(f'Fetching policy data for issue type: {state["issue_type"]}')
+    query = f"{state['issue_type']} {str(state['user_query'])}"
+    data = await search_knowledge_tool.ainvoke(query)
+    return {"policy_context": data}
+
+
+def shipment_fetch(state: SupportState) -> dict:
+    """Fetches shipment data concurrently."""
+    logger.debug(f'Fetching shipment data for Order Id: {state["order_id"]}')
+    data = get_shipment_status.invoke(state["order_id"])
+    return {"shipment": data}
+
+
+
+def context_builder(state: SupportState) -> dict:
+    """Executes ONLY after all triggered fetch nodes finish.
     
-    query = f"{issue_type} {str(state["user_query"])}"
-    policy_content = await search_knowledge_tool.ainvoke(query)
+    Compiles or cleans up the gathered state before analysis.
+    """
+    logger.debug("All parallel fetches complete! Processing context...")
+    return {} # State keys are already updated by the parallel nodes
 
-    return {
-        "policy_context": policy_content
-    }
+
+
+def requirement_router(state: SupportState) -> List[str]:
+    """Dynamically returns a list of all nodes that must run in parallel."""
+    nodes_to_run = state.get("required_fetches", [])
+    
+    if not nodes_to_run:
+        return ["context_builder"]
+        
+    return nodes_to_run
 
 
 
@@ -115,14 +157,7 @@ clearly state what information is missing."""
         """Customer Request:
 {user_query}
 
-Order Information:
-{order}
-
-Shipment Information:
-{shipment}
-
-Relevant Policy:
-{policy_context}
+{required_info}
 
 Determine the appropriate resolution."""
     ),
@@ -135,12 +170,28 @@ resolution_analyzer_chain = resolution_prompt | resolution_analyzer_llm
 def resolution_analyzer(state: SupportState) -> dict:
 
     logger.debug(f"Analyzing resolution for query")
+
+    required_info = ""
+
+    if state.get("order"):
+        required_info += f"Order Information:\n{state['order']}\n"
+    
+    if state.get("shipment"):
+        required_info += f"Shipment Information:\n{state['shipment']}\n"
+    
+    if state.get("policy_context"):
+        required_info += f"Relevant Policy:\n{state['policy_context']}\n"
+
+    if state.get("customer"):
+        required_info += f"Customer Profile:\n{state['customer']}\n"
+
+
     result = resolution_analyzer_chain.invoke({
         "user_query": state["user_query"],
-        "order": state["order"],
-        "shipment": state["shipment"],
-        "policy_context": state["policy_context"],
+        "required_info": required_info,
     })
+
+    logger.debug(f"Resolution analyzer result: {result}")
 
     return {
         "resolution": result.model_dump()
@@ -157,11 +208,13 @@ def response_generator(state: SupportState) -> dict:
     resolution = state["resolution"]
     
     prompt = (
-        "You are an empathetic and professional customer support assistant. "
-        "Write a clear, polite, and helpful final response to the customer based on their query and our internal resolution.\n\n"
+        "You are an empathetic, concise, and professional live chat support agent. "
+        "Write a clear, brief, and helpful real-time chat response to the customer. "
+        "Avoid email-style greetings (like 'Hello [Customer Name]') or formal sign-offs. "
+        "Ensure it feels like a live chat conversation.\n\n"
         f"Customer's Original Query:\n\"{user_query}\"\n\n"
         f"Internal Resolution Details:\n{resolution}\n\n"
-        "Draft the final response to the customer now:"
+        "Draft the real-time chat reply for the customer now:"
     )
     
     llm = LLMFactory.get_model()
@@ -190,32 +243,42 @@ def route_after_analysis(state: SupportState) -> str:
     return "ask_for_order_id"        # Divert to fallback flow
 
 
-
 wf = StateGraph(SupportState)
 
-# Add all functional nodes to the graph
+
 wf.add_node("request_analyzer", request_analyzer)
-wf.add_node("order_investigator", order_investigator)
-wf.add_node("policy_retriever", policy_retriever)
+wf.add_node("order_fetch", order_fetch)
+wf.add_node("customer_fetch", customer_fetch)
+wf.add_node("shipment_fetch", shipment_fetch)
+wf.add_node("policy_fetch", policy_fetch)
+wf.add_node("context_builder", context_builder)
 wf.add_node("resolution_analyzer", resolution_analyzer)
 wf.add_node("response_generator", response_generator)
-wf.add_node("ask_for_order_id", ask_for_order_id)
 
-# Define the sequential edge control flow
+
+
 wf.add_edge(START, "request_analyzer")
+
+# The router returns a list. If it returns ["order_fetch", "policy_fetch"], 
+# LangGraph spawns both threads concurrently.
 wf.add_conditional_edges(
     "request_analyzer",
-    route_after_analysis,
+    requirement_router,
     {
-        "order_investigator": "order_investigator",
-        "ask_for_order_id": "ask_for_order_id"
+        "order_fetch": "order_fetch",
+        "customer_fetch": "customer_fetch",
+        "policy_fetch": "policy_fetch",
+        "shipment_fetch": "shipment_fetch",
+        "context_builder": "context_builder" # Direct fallback edge
     }
 )
+# Pointing multiple independent nodes to the same target forces LangGraph to wait.
+wf.add_edge("order_fetch", "context_builder")
+wf.add_edge("customer_fetch", "context_builder")
+wf.add_edge("policy_fetch", "context_builder")
+wf.add_edge("shipment_fetch", "context_builder")
 
-wf.add_edge("ask_for_order_id", END)
-wf.add_edge("request_analyzer", "order_investigator")
-wf.add_edge("order_investigator", "policy_retriever")
-wf.add_edge("policy_retriever", "resolution_analyzer")
+wf.add_edge("context_builder", "resolution_analyzer")
 wf.add_edge("resolution_analyzer", "response_generator")
 wf.add_edge("response_generator", END)
 
