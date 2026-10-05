@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 import logging
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage,ToolCall,ToolMessage
 
+import json
+
 # 1. Load environment variables BEFORE importing your app modules
 load_dotenv() 
 
@@ -12,11 +14,9 @@ load_dotenv()
 from app.config import settings
 from app.logger import setup_logging
 
-setup_logging()
+setup_logging(log_level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
-
-
 
 
 
@@ -46,7 +46,6 @@ def save_graph_image(graph):
 
 
 
-
 async def rag():
     print("Initializing RAG service...")
     from app.core.workflows.rag.service import rag,query_enhancement
@@ -67,7 +66,6 @@ async def rag():
     except Exception as e:
         print(f"\n[ERROR]: An unexpected error occurred: {e}")
 
-
 def load_docs():    
     from app.core.workflows.rag.ingestion.service import load_documents
     from app.core.workflows.rag.vector_db.service import create_collection
@@ -76,10 +74,6 @@ def load_docs():
     ,chunk_overlap=200
     )
     
-
-
-import json
-
 def print_agent_trace(results: dict):
     """
     Dynamically tracks and pretty-prints the step-by-step 
@@ -167,10 +161,19 @@ async def react_agent():
     print_agent_trace(results)
 
 
+async def test_order_issue_resolutor_workflow():
+    from app.core.workflows.order_issue_resolutor.order_issue_resolution import order_issue_resolutor
+    result = await order_issue_resolutor.ainvoke({
+        "user_query": "I bought an item yesterday but my order ID is 12345. The screen is cracked, can I get a refund?"
+    })
+
+    logger.debug(result)
+
+    print(result['final_response'])
 
 
 if __name__ == "__main__":
 
 
-    asyncio.run(react_agent())
+    asyncio.run(test_order_issue_resolutor_workflow())
    

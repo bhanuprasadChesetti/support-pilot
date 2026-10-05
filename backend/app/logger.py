@@ -70,6 +70,7 @@ def setup_logging(log_level: int = logging.INFO) -> None:
     logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
     logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
     logging.getLogger("docling").setLevel(logging.WARNING)
+    logging.getLogger("groq._base_client").setLevel(logging.WARNING)
 
     logger = logging.getLogger("app")
     logger.info("Structured logging framework initialized successfully.")
