@@ -125,13 +125,17 @@ def requirement_router(state: SupportState) -> List[str]:
 
 class Resolution(BaseModel):
     decision: str = Field(
-        description="The recommended resolution for the customer."
+        description="The clear answer, policy determination, or resolution for the customer."
     )
     reason: str = Field(
-        description="Why this resolution is appropriate based on the order, shipment, and policy."
+        description="Why this decision is correct based on the provided context."
+    )
+    requires_customer_confirmation: bool = Field(
+        description="True if the customer must agree before executing any system actions. False if it is a pure information lookup or an authorized request."
     )
     actions: list[str] = Field(
-        description="Actions that should be taken to resolve the issue."
+        default=[],
+        description="System actions required (e.g., 'generate_refund', 'send_label'). Leave this array EMPTY if the request is purely informational and requires no backend system changes."
     )
 
 
