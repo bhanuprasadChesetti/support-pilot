@@ -36,12 +36,13 @@ MOCK_CUSTOMER_DB = {
     }
 }
 
-# Order database (Linked to Customer IDs)
+# Order database (Linked to Customer IDs) with Price Added
 MOCK_ORDER_DB = {
     "ORD-8821": {
         "order_id": "ORD-8821",
         "customer_id": "CUST-101",
         "product": "AuraGlow Face Serum",
+        "price": 1499,
         "order_date": "01 Oct 2026",
         "delivery_date": "05 Oct 2026",
         "order_status": "Shipped"
@@ -50,6 +51,7 @@ MOCK_ORDER_DB = {
         "order_id": "ORD-4492",
         "customer_id": "CUST-202",
         "product": "ZenFit Smart Band",
+        "price": 79.99,
         "order_date": "03 Oct 2026",
         "delivery_date": "07 Oct 2026",
         "order_status": "Processing"
@@ -58,11 +60,13 @@ MOCK_ORDER_DB = {
         "order_id": "ORD-1104",
         "customer_id": "CUST-303",
         "product": "EcoThread Cotton Hoodie",
+        "price": 55.00,
         "order_date": "25 Sep 2026",
         "delivery_date": "29 Sep 2026",
         "order_status": "Delivered"
     }
 }
+
 
 # Shipment tracking database (Linked to Order IDs)
 MOCK_SHIPMENT_DB = {
@@ -127,3 +131,43 @@ def get_customer_profile(customer_id: str) -> dict:
         {"error": f"Customer Profile for ID '{customer_id}' not found."}
     )
 
+
+
+
+
+@tool
+def cancel_order(order_id: str) -> dict:
+    """Cancel an eligible customer order."""
+    # mock implementation for now
+    return {
+        "success": True,
+        "order_id": order_id,
+        "status": "cancelled",
+    }
+
+
+@tool
+def initiate_refund(
+    order_id: str,
+    amount: float,
+    reason: str,
+) -> dict:
+    """Initiate a refund for a cancelled order."""
+    # mock implementation for now
+    return {
+        "success": True,
+        "order_id": order_id,
+        "amount": amount,
+        "status": "refund_initiated",
+    }
+
+
+@tool
+def create_return(order_id: str, reason: str) -> dict:
+    """Create a return request for an eligible order."""
+    # mock implementation for now
+    return {
+        "success": True,
+        "order_id": order_id,
+        "status": "return_created",
+    }

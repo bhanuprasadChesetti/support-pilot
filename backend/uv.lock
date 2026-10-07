@@ -362,7 +362,7 @@ dependencies = [
     { name = "langchain-qdrant" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-postgres" },
-    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg", extra = ["binary", "pool"] },
     { name = "psycopg2-binary" },
     { name = "pydantic-settings" },
     { name = "python-docx" },
@@ -402,7 +402,7 @@ requires-dist = [
     { name = "langchain-qdrant", specifier = ">=0.2.0" },
     { name = "langgraph", specifier = ">=0.2.0" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=2.0.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2.0" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2.0" },
     { name = "psycopg2-binary", specifier = ">=2.9.12" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
     { name = "python-docx", specifier = ">=1.2.0" },
@@ -3533,6 +3533,9 @@ wheels = [
 [package.optional-dependencies]
 binary = [
     { name = "psycopg-binary", marker = "implementation_name != 'pypy'" },
+]
+pool = [
+    { name = "psycopg-pool" },
 ]
 
 [[package]]

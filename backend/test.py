@@ -1,17 +1,21 @@
-from PIL.Image import logger
+from app.core import workflows
+import logging
 import asyncio
 import os
+import json
 from dotenv import load_dotenv
 import logging
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage,ToolCall,ToolMessage
 
-import json
 
 # 1. Load environment variables BEFORE importing your app modules
 load_dotenv() 
 
 
-from app.config import settings
+
+from app.core.workflows.registry import WORKFLOW_BLUEPRINTS
+
+
 from app.logger import setup_logging
 
 setup_logging(log_level=logging.DEBUG)
@@ -131,6 +135,43 @@ def print_agent_trace(results: dict):
                 
     print("\n" + "="*60 + "\n")
 
+
+
+
+import logging
+from contextlib import asynccontextmanager
+from app.db.checkpointer import db_checkpointer
+from app.core.workflows.registry import WORKFLOW_BLUEPRINTS
+
+
+logger = logging.getLogger("test_runner")
+
+@asynccontextmanager
+async def compile_workflow(workflow):
+    """
+    Generator/Context Manager that setups the DB pool, 
+    pre-compiles all workflows, yields them for testing, 
+    and handles automatic cleanup at the end.
+    """
+    logger.info("🔌 [SETUP] Initializing checkpointer pool...")
+    saver = await db_checkpointer.initialize()
+    
+    try:
+        logger.info("⚙️ [SETUP] Pre-compiling workflow registry...")
+        workflow_builder = WORKFLOW_BLUEPRINTS.get(workflow)
+        if not workflow_builder:
+            logger.error(f"❌ Workflow '{workflow}' not found in registry.")
+            return
+        compiled_workflow = workflow_builder.compile(checkpointer=saver)
+        yield compiled_workflow
+        
+    finally:
+        logger.info("🛑 [TEARDOWN] Cleaning up checkpointer pools...")
+        await db_checkpointer.close()
+
+
+
+
 async def react_agent():
     from app.core.agents.react import get_react_agent
     from app.core.tools.ecommerce import get_order_details, get_shipment_status, get_customer_profile
@@ -174,8 +215,12 @@ async def test_order_issue_resolutor_v2_workflow():
 
 async def test_order_issue_resolutor_v3_workflow():
     from app.core.workflows.order_issue_resolutor.order_issue_resolution import order_issue_resolutor
+
+    q1 = "Where is ORD-8821 right now?"
+    q2 = "Can I return ORD-1104?"
+    
     result = await order_issue_resolutor.ainvoke({
-        "user_query": "Where is ORD-8821 right now?"
+        "user_query": q2
     })
 
     logger.debug(result)
@@ -185,8 +230,85 @@ async def test_order_issue_resolutor_v3_workflow():
     print('=========================================')
 
 
+async def test_order_issue_resolutor_action_planner(order_issue_resolutor):
+
+    q1 = "Where is ORD-8821 right now?"
+    q2 = "I want to cancel my order ORD-8821 and get a full refund of ₹1499."
+    q3 = "I want to cancel my order ORD-4492 and get a full refund of $79.99. Customer id is CUST-202"
+
+
+    # 1. Target your active thread
+    # config = {"configurable": {"thread_id": "standalone-test-approval-planner"}}
+
+
+    config = {"configurable": {"thread_id": "standalone-test-approval-testing"}}
+
+    # Initial Run with Intentional Fail
+    # result = await order_issue_resolutor.ainvoke({
+    #     "user_query": q3
+    # }, config=config)
+
+
+    # # Inspect checkpoint
+    # state = await order_issue_resolutor.aget_state(config)
+
+    # print("Current state:", state.values)
+    # print("Next:", state.next)
+
+
+    # Resume same thread
+    # result = await order_issue_resolutor.ainvoke(
+    #     None,
+    #     config=config
+    # )
+
+    # ================== approval =================
+    # Requested approval
+    # result = await order_issue_resolutor.ainvoke({
+    #     "user_query": q3
+    # }, config=config)
+
+    # Resume same thread
+    # result = await order_issue_resolutor.ainvoke(
+    #     None,
+    #     config=config
+    # )
+
+    # Customer Giving approval
+    from langgraph.types import Command
+
+    result = await order_issue_resolutor.ainvoke(
+        Command(
+            resume={
+                "decision": "approved",
+                "approver_id": "Manager-202",
+                "reason": "I approve the Refund."
+            }
+        ),
+        config=config,
+    )
+    logger.debug(result)
+
+    print('=========================================')
+    is_approval_needed = result.get('__interrupt__')
+
+    if is_approval_needed:
+        print('Approval Needed')
+        print(result.get('approval_request', {}))
+    else:
+        print('No Approval Needed')
+        print(result['final_response'])
+    print('=========================================')
+
+
+async def main():
+    # Consume the generator cleanly using an async context block
+    async with compile_workflow('order_issue_resolutor') as workflow:
+        await test_order_issue_resolutor_action_planner(workflow)
+        
+
 if __name__ == "__main__":
 
+    asyncio.run(main())
+    # pass
 
-    asyncio.run(test_order_issue_resolutor_v3_workflow())
-   
