@@ -7,6 +7,10 @@ from .factory import LLMFactory
 
 logger = logging.getLogger(__name__)
 
+
+
+llm = LLMFactory.get_model()
+
 class LLMService:
 
     @classmethod

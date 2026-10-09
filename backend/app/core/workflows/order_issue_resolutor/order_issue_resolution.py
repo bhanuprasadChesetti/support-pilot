@@ -8,34 +8,29 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage
 
 
-from app.core.llm.factory import LLMFactory
+from app.core.llm.service import llm
 from app.core.tools.ecommerce import get_order_details,get_shipment_status,get_customer_profile
 from app.core.tools.rag import create_search_knowledge_tool
 
 logger = logging.getLogger(__name__)
 
-from typing import TypedDict, List, Optional, Literal
-
-
-llm = LLMFactory.get_model()
+from typing import Annotated,TypedDict, List, Optional, Literal
+from .agents.order import order_agent_tool
+from langchain_core.messages import ToolMessage
+import operator
 
 class SupportState(TypedDict, total=False):
-    user_query: str
-    order_id: Optional[str]
-    customer_id: Optional[str]
-    issue_type: Optional[str]
-    
-    # The router will populate this list (e.g., ["order_fetch", "policy_fetch"])
-    required_fetches: List[Literal["order_fetch", "customer_fetch", "policy_fetch","shipment_fetch"]]
 
-    # Parallel node outputs
-    order: Optional[dict]
-    shipment: Optional[dict]
-    customer: Optional[dict]
-    policy_context: Optional[str]
+    user_query : str
+
+    messages: Annotated[list, add_messages]
+
+    agent_results: Annotated[
+        list,
+        operator.add
+    ]
 
     resolution: Optional[dict]
-    final_response: Optional[str]
 
     actions: list[dict]
 
@@ -51,6 +46,7 @@ class SupportState(TypedDict, total=False):
 
     workflow_status: str
 
+    final_response: Optional[str]
 
 from typing import Literal, List, Optional
 from pydantic import BaseModel, Field
@@ -84,82 +80,137 @@ request_analyzer_llm = llm.with_structured_output(RequestAnalyzerOutput)
 
 search_knowledge_tool = create_search_knowledge_tool(top_k=2)
 
-def request_analyzer(state: SupportState) -> dict:
+
+supervisor_llm = llm.bind_tools([
+    order_agent_tool,
+])
+
+def request_analyzer_agent(state: SupportState) -> dict:
     """Extracts order_id and issue_type from the user's initial query."""
     logger.info(f"Analyzing request: {state}")
 
+    SUPERVISOR_PROMPT = """
+You are the Request Analyzer for a customer-support resolution workflow.
 
-    extracted_data = request_analyzer_llm.invoke(state["user_query"])
+## Your responsibility
 
-    extracted_data = extracted_data.model_dump()
-    
-    mapping = {
-        "order": "order_fetch",
-        "customer": "customer_fetch",
-        "policy": "policy_fetch",
-        "shipment": "shipment_fetch"
-    }
-    required_nodes = [mapping[item] for item in extracted_data["needed_information"] if item in mapping]
-    logger.debug(f'Required Nodes to call {required_nodes}')
+Understand the customer's request and identify what information is required to determine the correct resolution.
+
+You may delegate information-gathering tasks to specialist agents using the available agent tools.
+
+You do NOT resolve the issue, plan business actions, or execute operations.
+
+## Workflow
+
+1. Understand the customer's underlying issue and desired outcome.
+2. Identify which facts are needed to evaluate the request.
+3. Call the relevant specialist agents to retrieve those facts.
+4. Use only the agents necessary to gather sufficient information.
+5. If no additional information is needed, do not call any agents.
+
+## Specialist-agent usage
+
+Specialist agents are information-retrieval specialists.
+
+Use them to retrieve facts such as:
+
+* Order details and current order status.
+* Shipment and delivery information.
+* Customer or payment information.
+* Applicable business policies and eligibility requirements.
+
+Pass each agent a request to retrieve specific information, not to perform a business operation.
+
+## Strict restrictions
+
+* Never instruct specialist agents to cancel, refund, modify, create, or otherwise execute business operations.
+* Never ask agents to perform the customer's desired action.
+* Never decide whether the requested action should actually be performed.
+* Never create an action plan.
+* Never invent missing facts.
+* Do not call tools merely because the customer requested an action.
+
+## Handoff
+
+Your output should consist of the original customer request and the information gathered by the specialist agents.
+
+The Resolution Analyzer will determine the appropriate resolution. The Action Planner will decide which concrete operations are needed.
+
+Your job is information gathering only.
+
+"""
+
+    user_query = state["messages"][-1].content
+
+    messages = [
+        SystemMessage(content=SUPERVISOR_PROMPT),
+        *state["messages"],
+    ]
+
+    response = supervisor_llm.invoke(messages)
 
     return {
-        "order_id": extracted_data.get("order_id"),
-        "customer_id": extracted_data.get("customer_id"),
-        "issue_type": extracted_data.get("issue_type"),
-        "required_fetches": required_nodes
+        "user_query": user_query,
+        "messages": [response]
     }
 
 
+from langgraph.constants import Send
 
-def order_fetch(state: SupportState) -> dict:
-    """Fetches order data concurrently."""
-    logger.debug(f'Fetching order data for Order Id: {state["order_id"]}')
-    data = get_order_details.invoke(state["order_id"]) 
-    return {"order": data}
+def route_agent_calls(state: SupportState):
+    supervisor_message = state["messages"][-1]
 
+    # No tool calls → skip sub-agents
+    if not supervisor_message.tool_calls:
+        return "resolution_analyzer"
 
-def customer_fetch(state: SupportState) -> dict:
-    """Fetches customer profile concurrently."""
-    logger.debug(f'Fetching customer data for Customer Id: {state["customer_id"]}')
-    data = get_customer_profile.invoke(state["customer_id"]) 
-    return {"customer": data}
+    logger.debug(f'Supervisor Agents calls: {supervisor_message.tool_calls}')
+    # Tool calls exist → execute sub-agents in parallel
+    sends = []
 
+    for tool_call in supervisor_message.tool_calls:
+        sends.append(
+            Send(
+                "agent_executor",
+                {
+                    "tool_call": tool_call,
+                    "user_query": state["user_query"],
+                },
+            )
+        )
 
-async def policy_fetch(state: SupportState) -> dict:
-    """Fetches policy documents concurrently."""
-    logger.debug(f'Fetching policy data for issue type: {state["issue_type"]}')
-    query = f"{state['issue_type']} {str(state['user_query'])}"
-    data = await search_knowledge_tool.ainvoke(query)
-    return {"policy_context": data}
+    return sends
 
+from .agents.order import order_agent_tool
+from .agents.shipment import shipment_agent_tool
+from .agents.policy import policy_agent_tool
 
-def shipment_fetch(state: SupportState) -> dict:
-    """Fetches shipment data concurrently."""
-    logger.debug(f'Fetching shipment data for Order Id: {state["order_id"]}')
-    data = get_shipment_status.invoke(state["order_id"])
-    return {"shipment": data}
+AGENT_TOOLS = {
+    "order_agent_tool": order_agent_tool,
+    "shipment_agent_tool": shipment_agent_tool,
+    "policy_agent_tool": policy_agent_tool,
+}
 
+def agent_executor(state):
 
+    tool_call = state["tool_call"]
 
-def context_builder(state: SupportState) -> dict:
-    """Executes ONLY after all triggered fetch nodes finish.
-    
-    Compiles or cleans up the gathered state before analysis.
-    """
-    logger.debug("All parallel fetches complete! Processing context...")
-    return {} # State keys are already updated by the parallel nodes
+    tool_name = tool_call["name"]
+    tool_args = tool_call["args"]
 
+    agent_tool = AGENT_TOOLS[tool_name]
 
+    result = agent_tool.invoke(tool_args)
 
-def requirement_router(state: SupportState) -> List[str]:
-    """Dynamically returns a list of all nodes that must run in parallel."""
-    nodes_to_run = state.get("required_fetches", [])
-    
-    if not nodes_to_run:
-        return ["context_builder"]
-        
-    return nodes_to_run
-
+    return {
+        "agent_results": [
+            {
+                "tool_call_id": tool_call["id"],
+                "agent": tool_name,
+                "result": result,
+            }
+        ]
+    }
 
 
 
@@ -192,25 +243,25 @@ resolution_analyzer_llm = llm.with_structured_output(ResolutionAnalysis)
 
 
 
-
 def resolution_analyzer(state: SupportState):
-
-    logger.debug("Analyzing the customer query for resolution...")
+    logger.debug(f'Resolution Analyzer with agent outputs {state.get("agent_results", [])}')
 
     required_info = ""
 
-    if state.get("order"):
-        required_info += f"Order Information:\n{state['order']}\n"
-    
-    if state.get("shipment"):
-        required_info += f"Shipment Information:\n{state['shipment']}\n"
-    
-    if state.get("policy_context"):
-        required_info += f"Relevant Policy:\n{state['policy_context']}\n"
+    # Add results returned by parallel sub-agents
+    agent_results = state.get("agent_results", [])
 
-    if state.get("customer"):
-        required_info += f"Customer Profile:\n{state['customer']}\n"
+    if agent_results:
+        required_info += "\nInformation collected by specialist agents:\n"
 
+        for agent_result in agent_results:
+            agent_name = agent_result.get("agent_name", "Unknown Agent")
+            result = agent_result.get("result", agent_result)
+
+            required_info += (
+                f"\n{agent_name}:\n"
+                f"{result}\n"
+            )
 
     messages = [
         SystemMessage(
@@ -253,12 +304,9 @@ Requirements identified:
 
     result = resolution_analyzer_llm.invoke(messages)
 
-
     return {
         "resolution": result.model_dump()
     }
-
-
 
 
 
@@ -676,45 +724,35 @@ def approval_router(state: SupportState):
         f"Unknown approval status: {state['workflow_status']}"
     )
 
+
 order_issue_resolutor = StateGraph(SupportState)
 
-
-order_issue_resolutor.add_node("request_analyzer", request_analyzer)
-order_issue_resolutor.add_node("order_fetch", order_fetch)
-order_issue_resolutor.add_node("customer_fetch", customer_fetch)
-order_issue_resolutor.add_node("shipment_fetch", shipment_fetch)
-order_issue_resolutor.add_node("policy_fetch", policy_fetch)
-order_issue_resolutor.add_node("context_builder", context_builder)
-order_issue_resolutor.add_node("resolution_analyzer", resolution_analyzer)
-order_issue_resolutor.add_node("action_planner", action_planner)
-order_issue_resolutor.add_node("action_executor", action_executor)
-order_issue_resolutor.add_node("approval_node", approval_node)
-order_issue_resolutor.add_node("response_generator", response_generator)
+order_issue_resolutor.add_node("request_analyzer_agent",request_analyzer_agent)
+order_issue_resolutor.add_node("agent_executor",agent_executor)
+order_issue_resolutor.add_node("resolution_analyzer",resolution_analyzer)
+order_issue_resolutor.add_node("action_planner",action_planner)
+order_issue_resolutor.add_node("action_executor",action_executor)
+order_issue_resolutor.add_node("approval_node",approval_node)
+order_issue_resolutor.add_node("response_generator",response_generator)
 
 
 
-order_issue_resolutor.add_edge(START, "request_analyzer")
+order_issue_resolutor.add_edge(START, "request_analyzer_agent")
 
-# The router returns a list. If it returns ["order_fetch", "policy_fetch"], 
-# LangGraph spawns both threads concurrently.
 order_issue_resolutor.add_conditional_edges(
-    "request_analyzer",
-    requirement_router,
+    "request_analyzer_agent",
+    route_agent_calls,
     {
-        "order_fetch": "order_fetch",
-        "customer_fetch": "customer_fetch",
-        "policy_fetch": "policy_fetch",
-        "shipment_fetch": "shipment_fetch",
-        "context_builder": "context_builder" # Direct fallback edge
+        "resolution_analyzer": "resolution_analyzer",
     }
 )
-# Pointing multiple independent nodes to the same target forces LangGraph to wait.
-order_issue_resolutor.add_edge("order_fetch", "context_builder")
-order_issue_resolutor.add_edge("customer_fetch", "context_builder")
-order_issue_resolutor.add_edge("policy_fetch", "context_builder")
-order_issue_resolutor.add_edge("shipment_fetch", "context_builder")
 
-order_issue_resolutor.add_edge("context_builder", "resolution_analyzer")
+order_issue_resolutor.add_edge(
+    "agent_executor",
+    "resolution_analyzer",
+)
+
+
 order_issue_resolutor.add_conditional_edges(
     "resolution_analyzer",
     resolution_router,

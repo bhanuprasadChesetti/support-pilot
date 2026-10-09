@@ -98,6 +98,15 @@ def get_order_details(order_id: str) -> dict:
 
     Args:
         order_id: The unique alphanumeric identifier of the customer's order (e.g., 'ORD-8821').
+
+    Returns:
+        order_id
+        customer_id
+        product
+        price
+        order_date
+        delivery_date
+        order_status
     """
     # Returns the exact database record or a clean error message if the LLM hallucinated an ID
     return MOCK_ORDER_DB.get(
@@ -118,6 +127,20 @@ def get_shipment_status(order_id: str) -> dict:
         {"error": f"No shipment tracking tracking data found for Order ID '{order_id}'."}
     )
 
+
+@tool
+def get_tracking_events(order_id: str) -> list:
+    """Get recent shipment tracking events."""
+    return [
+        {
+            "event": "Package picked up",
+            "timestamp": "2026-10-06T10:30:00",
+        },
+        {
+            "event": "Reached Hyderabad hub",
+            "timestamp": "2026-10-07T18:20:00",
+        },
+    ]
 
 @tool
 def get_customer_profile(customer_id: str) -> dict:
